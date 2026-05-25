@@ -938,6 +938,33 @@
   line-height: 1.5;
 }
 
+.buff-sheet-ai-config-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.buff-sheet-ai-config-grid label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: #425166;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.buff-sheet-ai-config-grid input {
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid #d2d8e3;
+  background: #fff;
+  color: #1f2634;
+  box-sizing: border-box;
+  font: 12px/1.4 'Consolas', 'SFMono-Regular', 'Microsoft YaHei UI', monospace;
+}
+
 .buff-sheet-ai-input,
 .buff-sheet-ai-textarea,
 .buff-sheet-ai-json-preview,
@@ -1260,6 +1287,10 @@
   }
 
   .buff-sheet-ai-modal-body {
+    grid-template-columns: 1fr;
+  }
+
+  .buff-sheet-ai-config-grid {
     grid-template-columns: 1fr;
   }
 

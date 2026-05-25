@@ -3,7 +3,10 @@ import { useState, type ReactNode } from 'react';
 export interface BuffFillAgentModalProps {
   isOpen: boolean;
   hasSharedAiApiKey: boolean;
+  sharedAiApiKey: string;
   sharedAiModel: string;
+  onSharedAiApiKeyChange: (value: string) => void;
+  onSharedAiModelChange: (value: string) => void;
   promptPreviewMode: 'system' | 'mapping' | 'final';
   onPromptPreviewModeChange: (mode: 'system' | 'mapping' | 'final') => void;
   systemPrompt: string;
@@ -33,7 +36,10 @@ export function BuffFillAgentModal(props: BuffFillAgentModalProps) {
   const {
     isOpen,
     hasSharedAiApiKey,
+    sharedAiApiKey,
     sharedAiModel,
+    onSharedAiApiKeyChange,
+    onSharedAiModelChange,
     promptPreviewMode,
     onPromptPreviewModeChange,
     systemPrompt,
@@ -86,7 +92,29 @@ export function BuffFillAgentModal(props: BuffFillAgentModalProps) {
             </div>
             <div className="buff-sheet-ai-shared-banner is-workflow">
               <strong>{isSubmitting ? '执行中' : workflowLogs.trim() ? '执行日志' : '等待执行'}</strong>
-              <span>{hasSharedAiApiKey ? `当前模型：${sharedAiModel}` : '当前未配置 API Key，请先到 shell 中设置。'}</span>
+              <span>{hasSharedAiApiKey ? `当前模型：${sharedAiModel}` : '当前未配置 API Key，请先在这里填写。'}</span>
+            </div>
+            <div className="buff-sheet-ai-config-grid">
+              <label>
+                <span>Ark API Key</span>
+                <input
+                  type="password"
+                  value={sharedAiApiKey}
+                  onChange={(event) => onSharedAiApiKeyChange(event.target.value)}
+                  placeholder="输入豆包 Ark API Key，保存在当前浏览器 localStorage"
+                  autoComplete="off"
+                />
+              </label>
+              <label>
+                <span>模型</span>
+                <input
+                  type="text"
+                  value={sharedAiModel}
+                  onChange={(event) => onSharedAiModelChange(event.target.value)}
+                  placeholder="doubao-seed-2-0-lite-260215"
+                  autoComplete="off"
+                />
+              </label>
             </div>
             <pre className="buff-sheet-ai-console-log">{workflowLogs.trim() || '[workflow] 等待执行。'}</pre>
           </section>
@@ -182,8 +210,8 @@ export function BuffFillAgentModal(props: BuffFillAgentModalProps) {
                 </button>
               </div>
               <div className="buff-sheet-ai-shared-banner">
-                <strong>使用共享模型配置</strong>
-                <span>{hasSharedAiApiKey ? `当前模型：${sharedAiModel}` : '当前未配置 API Key，请先到 shell 中设置。'}</span>
+                <strong>使用本地模型配置</strong>
+                <span>{hasSharedAiApiKey ? `当前模型：${sharedAiModel}` : '当前未配置 API Key，请先在 Workflow 面板填写。'}</span>
               </div>
               <textarea
                 className="buff-sheet-ai-textarea is-system"

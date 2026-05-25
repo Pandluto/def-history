@@ -248,7 +248,10 @@ type BuffSheetAiPromptPreviewMode = 'system' | 'mapping' | 'final';
 
 const BUFF_SHEET_AI_SYSTEM_PROMPT_STORAGE_KEY = 'def.buff-sheet.ai.system-prompt.v1';
 const BUFF_SHEET_AI_SOURCE_TEXT_STORAGE_KEY = 'def.buff-sheet.ai.source-text.v1';
-const DEFAULT_BUFF_SHEET_AI_MODEL = 'doubao-seed-2-0-mini-260428';
+const BUFF_SHEET_AI_API_KEY_STORAGE_KEY = 'def.buff-sheet.ai.api-key.v1';
+const BUFF_SHEET_AI_MODEL_STORAGE_KEY = 'def.buff-sheet.ai.model.v1';
+const DEFAULT_BUFF_SHEET_AI_MODEL = 'doubao-seed-2-0-lite-260215';
+const BUFF_SHEET_AI_ARK_ENDPOINT = 'https://ark.cn-beijing.volces.com/api/v3/chat/completions';
 const AI_FILL_TIMEOUT_MS = 120000;
 const DEFAULT_BUFF_SHEET_AI_SYSTEM_PROMPT = buffSheetAiSystemPromptRaw.trim();
 
@@ -271,6 +274,83 @@ function writeBuffSheetAiStorage(key: string, value: string) {
     window.localStorage.setItem(key, value);
   } catch {
     // noop
+  }
+}
+
+async function invokeArkResponsesFromBrowser(payload: {
+  apiKey: string;
+  model: string;
+  prompt: string;
+}): Promise<DesktopArkResponseResult> {
+  const apiKey = payload.apiKey.trim();
+  const model = payload.model.trim();
+  const prompt = payload.prompt.trim();
+
+  if (!apiKey) {
+    throw new Error('API Key 不能为空');
+  }
+  if (!model) {
+    throw new Error('模型名不能为空');
+  }
+  if (!prompt) {
+    throw new Error('提示词不能为空');
+  }
+
+  const controller = new AbortController();
+  const startedAt = Date.now();
+  const timeoutId = window.setTimeout(() => controller.abort(), AI_FILL_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(BUFF_SHEET_AI_ARK_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+        thinking: {
+          type: 'disabled',
+        },
+      }),
+      signal: controller.signal,
+    });
+
+    const rawText = await response.text();
+    let data: unknown = null;
+    try {
+      data = rawText ? JSON.parse(rawText) : null;
+    } catch {
+      data = null;
+    }
+
+    if (!response.ok) {
+      const detail = data && typeof data === 'object'
+        ? ((data as { error?: { message?: string }; message?: string }).error?.message || (data as { message?: string }).message)
+        : '';
+      throw new Error(detail || rawText || `HTTP ${response.status}`);
+    }
+
+    return {
+      ok: true,
+      status: response.status,
+      durationMs: Date.now() - startedAt,
+      timeoutMs: AI_FILL_TIMEOUT_MS,
+      data: data ?? rawText,
+    };
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error(`模型请求超时（${Math.round(AI_FILL_TIMEOUT_MS / 1000)} 秒）`);
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
   }
 }
 
@@ -2980,8 +3060,8 @@ export function BuffDraftSheetPage() {
   const [dragState, setDragState] = useState<BuffExplorerDragState | null>(null);
   const [isAiFillModalOpen, setIsAiFillModalOpen] = useState(false);
   const [aiFillPreviewMode, setAiFillPreviewMode] = useState<BuffSheetAiPreviewMode>('text');
-  const [sharedAiModel, setSharedAiModel] = useState(DEFAULT_BUFF_SHEET_AI_MODEL);
-  const [hasSharedAiApiKey, setHasSharedAiApiKey] = useState(false);
+  const [sharedAiModel, setSharedAiModel] = useState(() => readBuffSheetAiStorage(BUFF_SHEET_AI_MODEL_STORAGE_KEY, DEFAULT_BUFF_SHEET_AI_MODEL));
+  const [sharedAiApiKey, setSharedAiApiKey] = useState(() => readBuffSheetAiStorage(BUFF_SHEET_AI_API_KEY_STORAGE_KEY));
   const [aiFillSystemPrompt, setAiFillSystemPrompt] = useState(() => readBuffSheetAiStorage(BUFF_SHEET_AI_SYSTEM_PROMPT_STORAGE_KEY, DEFAULT_BUFF_SHEET_AI_SYSTEM_PROMPT));
   const [aiFillSourceText, setAiFillSourceText] = useState(() => readBuffSheetAiStorage(BUFF_SHEET_AI_SOURCE_TEXT_STORAGE_KEY));
   const [aiFillRawResponseJson, setAiFillRawResponseJson] = useState('');
@@ -3068,22 +3148,6 @@ export function BuffDraftSheetPage() {
   }, []);
 
   useEffect(() => {
-    if (!isAiFillModalOpen || !window.desktopRuntime?.getLlmSettings) {
-      return;
-    }
-
-    window.desktopRuntime.getLlmSettings()
-      .then((settings) => {
-        setSharedAiModel(settings.model || DEFAULT_BUFF_SHEET_AI_MODEL);
-        setHasSharedAiApiKey(Boolean(settings.hasApiKey));
-      })
-      .catch(() => {
-        setSharedAiModel(DEFAULT_BUFF_SHEET_AI_MODEL);
-        setHasSharedAiApiKey(false);
-      });
-  }, [isAiFillModalOpen]);
-
-  useEffect(() => {
     if (!isAiFillSubmitting) {
       return;
     }
@@ -3147,16 +3211,6 @@ export function BuffDraftSheetPage() {
   }, [aiFillSourceText, isAiFillSubmitting]);
 
   const handleSubmitAiFill = useCallback(async () => {
-    if (!window.desktopRuntime?.invokeArkResponses) {
-      setAiFillStatus('当前环境不可用');
-      setAiFillRawResponseJson(JSON.stringify({ error: '当前不是 Electron 桌面环境，无法调用模型接口。' }, null, 2));
-      setAiFillWorkflowLogs('[workflow] 当前不是 Electron 桌面环境，无法调用模型接口。');
-      setAiFillPreviewDraft(null);
-      setAiFillWorkflowState(null);
-      setAiFillValidationErrors([]);
-      return;
-    }
-
     const sourceText = aiFillSourceText.trim();
     const workflow = splitAiFillWorkflow(sourceText);
     const workflowLogs: string[] = [];
@@ -3165,9 +3219,14 @@ export function BuffDraftSheetPage() {
       setAiFillWorkflowLogs(workflowLogs.join('\n'));
     };
 
-    if (!hasSharedAiApiKey) {
-      setAiFillStatus('缺少共享模型配置');
-      setAiFillWorkflowLogs('[workflow] 缺少共享模型配置。');
+    if (!sharedAiApiKey.trim()) {
+      setAiFillStatus('缺少 API Key');
+      setAiFillWorkflowLogs('[workflow] 缺少 API Key，请在弹窗中填写并保存到 localStorage。');
+      return;
+    }
+    if (!sharedAiModel.trim()) {
+      setAiFillStatus('缺少模型名');
+      setAiFillWorkflowLogs('[workflow] 缺少模型名，请在弹窗中填写模型名。');
       return;
     }
     if (!sourceText) {
@@ -3214,9 +3273,9 @@ export function BuffDraftSheetPage() {
         };
         setAiFillWorkflowState(nextWorkflowState);
 
-        const result = await window.desktopRuntime.invokeArkResponses({
-          apiKey: '',
-          model: '',
+        const result = await invokeArkResponsesFromBrowser({
+          apiKey: sharedAiApiKey,
+          model: sharedAiModel,
           prompt: buildBuffFillSectionPrompt(aiFillSystemPrompt.trim(), aiFillMappingPrompt, section),
         });
 
@@ -3293,7 +3352,7 @@ export function BuffDraftSheetPage() {
     } finally {
       setIsAiFillSubmitting(false);
     }
-  }, [aiFillElapsedSeconds, aiFillMappingPrompt, aiFillSourceText, aiFillSystemPrompt, hasSharedAiApiKey]);
+  }, [aiFillElapsedSeconds, aiFillMappingPrompt, aiFillSourceText, aiFillSystemPrompt, sharedAiApiKey, sharedAiModel]);
 
   const handleApplyAiFillPreview = useCallback(() => {
     if (!aiFillPreviewDraft) {
@@ -5215,8 +5274,17 @@ export function BuffDraftSheetPage() {
       ) : null}
       <BuffFillAgentModal
         isOpen={isAiFillModalOpen}
-        hasSharedAiApiKey={hasSharedAiApiKey}
+        hasSharedAiApiKey={Boolean(sharedAiApiKey.trim())}
+        sharedAiApiKey={sharedAiApiKey}
         sharedAiModel={sharedAiModel}
+        onSharedAiApiKeyChange={(nextValue) => {
+          setSharedAiApiKey(nextValue);
+          writeBuffSheetAiStorage(BUFF_SHEET_AI_API_KEY_STORAGE_KEY, nextValue);
+        }}
+        onSharedAiModelChange={(nextValue) => {
+          setSharedAiModel(nextValue);
+          writeBuffSheetAiStorage(BUFF_SHEET_AI_MODEL_STORAGE_KEY, nextValue);
+        }}
         promptPreviewMode={aiFillPromptPreviewMode}
         onPromptPreviewModeChange={setAiFillPromptPreviewMode}
         systemPrompt={aiFillSystemPrompt}
